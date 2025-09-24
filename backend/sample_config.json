@@ -1,0 +1,39 @@
+{
+  "trading_config": {
+    "initial_cash": 100000.0,
+    "default_symbol": "AAPL",
+    "supported_symbols": ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN", "META"],
+    "default_strategy": "sma",
+    "streaming_interval": 1.0,
+    "max_position_size": 0.1,
+    "risk_management": {
+      "max_drawdown": 0.2,
+      "stop_loss": 0.05,
+      "take_profit": 0.1
+    }
+  },
+  "strategies": {
+    "sma": {
+      "short_window": 10,
+      "long_window": 30,
+      "description": "Simple Moving Average Crossover"
+    },
+    "rsi": {
+      "period": 14,
+      "oversold": 30,
+      "overbought": 70,
+      "description": "RSI Momentum Strategy"
+    },
+    "bollinger": {
+      "period": 20,
+      "std_dev": 2,
+      "description": "Bollinger Bands Mean Reversion"
+    }
+  },
+  "backtest_settings": {
+    "default_days": 30,
+    "max_days": 365,
+    "commission": 0.001,
+    "slippage": 0.0005
+  }
+}
