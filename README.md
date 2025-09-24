@@ -280,4 +280,4 @@ This project serves as a comprehensive demonstration of algorithmic trading syst
 *Demonstrating full-stack development skills in financial technology*
 \`\`\`
 
-```json file="" isHidden
+\`\`\`json file="" isHidden
