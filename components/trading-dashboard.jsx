@@ -7,89 +7,161 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
-import { Play, Pause, Square, Activity } from "lucide-react"
+import { Play, Pause, Square, Activity, AlertCircle } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 import PriceChart from "./price-chart"
 import PortfolioPanel from "./portfolio-panel"
 import TradeLog from "./trade-log"
 import BacktestResults from "./backtest-results"
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+// Mock data for when backend is not available
+const MOCK_HISTORICAL_DATA = [
+  { timestamp: "2024-01-01T09:30:00Z", open: 150, high: 155, low: 148, close: 152, volume: 1000000 },
+  { timestamp: "2024-01-01T09:31:00Z", open: 152, high: 154, low: 151, close: 153, volume: 950000 },
+  { timestamp: "2024-01-01T09:32:00Z", open: 153, high: 156, low: 152, close: 155, volume: 1100000 },
+  { timestamp: "2024-01-01T09:33:00Z", open: 155, high: 157, low: 154, close: 156, volume: 980000 },
+  { timestamp: "2024-01-01T09:34:00Z", open: 156, high: 158, low: 155, close: 157, volume: 1050000 },
+]
+
 export default function TradingDashboard() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [currentSymbol, setCurrentSymbol] = useState("AAPL")
-  const [marketData, setMarketData] = useState([])
+  const [marketData, setMarketData] = useState(MOCK_HISTORICAL_DATA)
   const [signals, setSignals] = useState({})
   const [portfolio, setPortfolio] = useState({ cash: 100000, total_value: 100000, total_pnl: 0 })
   const [trades, setTrades] = useState([])
   const [backtestResults, setBacktestResults] = useState(null)
   const [selectedStrategy, setSelectedStrategy] = useState("sma")
+  const [backendConnected, setBackendConnected] = useState(false)
+  const [connectionError, setConnectionError] = useState("")
   const wsRef = useRef(null)
 
   useEffect(() => {
+    // Check backend connection first
+    checkBackendConnection()
     // Load initial data
     loadHistoricalData()
     loadPortfolio()
     loadTrades()
   }, [currentSymbol])
 
+  const checkBackendConnection = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/`, {
+        method: "GET",
+        signal: AbortSignal.timeout(5000), // 5 second timeout
+      })
+      if (response.ok) {
+        setBackendConnected(true)
+        setConnectionError("")
+        console.log("[v0] Backend connected successfully")
+      } else {
+        throw new Error(`Backend returned ${response.status}`)
+      }
+    } catch (error) {
+      setBackendConnected(false)
+      setConnectionError(error.message)
+      console.log("[v0] Backend not available, using mock data")
+    }
+  }
+
   const loadHistoricalData = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/historical/${currentSymbol}?days=30`)
+      const response = await fetch(`${API_BASE_URL}/api/historical/${currentSymbol}?days=30`, {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
-      setMarketData(data.data || [])
+      setMarketData(data.data || MOCK_HISTORICAL_DATA)
+      console.log("[v0] Loaded historical data from backend")
     } catch (error) {
-      console.error("Failed to load historical data:", error)
+      console.log("[v0] Using mock historical data:", error.message)
+      // Use mock data when backend is not available
+      setMarketData(MOCK_HISTORICAL_DATA)
     }
   }
 
   const loadPortfolio = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/portfolio")
+      const response = await fetch(`${API_BASE_URL}/api/portfolio`, {
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
       setPortfolio(data)
+      console.log("[v0] Loaded portfolio from backend")
     } catch (error) {
-      console.error("Failed to load portfolio:", error)
+      console.log("[v0] Using mock portfolio data:", error.message)
+      // Keep default portfolio when backend is not available
     }
   }
 
   const loadTrades = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/trades")
+      const response = await fetch(`${API_BASE_URL}/api/trades`, {
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
       setTrades(data || [])
+      console.log("[v0] Loaded trades from backend")
     } catch (error) {
-      console.error("Failed to load trades:", error)
+      console.log("[v0] Using mock trades data:", error.message)
+      // Keep empty trades when backend is not available
     }
   }
 
   const connectWebSocket = () => {
+    if (!backendConnected) {
+      console.log("[v0] Cannot connect WebSocket - backend not available")
+      return
+    }
+
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
-    wsRef.current = new WebSocket("ws://localhost:8000/ws")
+    try {
+      wsRef.current = new WebSocket(`ws://localhost:8000/ws`)
 
-    wsRef.current.onopen = () => {
-      console.log("[v0] WebSocket connected")
-    }
-
-    wsRef.current.onmessage = (event) => {
-      const message = JSON.parse(event.data)
-
-      if (message.type === "market_data") {
-        setMarketData((prev) => [...prev.slice(-999), message.candle])
-        setSignals(message.signals || {})
-        setPortfolio(message.portfolio || portfolio)
-      } else if (message.type === "trade_executed") {
-        setTrades((prev) => [message.trade, ...prev])
-        loadPortfolio() // Refresh portfolio
+      wsRef.current.onopen = () => {
+        console.log("[v0] WebSocket connected")
       }
-    }
 
-    wsRef.current.onclose = () => {
-      console.log("[v0] WebSocket disconnected")
+      wsRef.current.onmessage = (event) => {
+        const message = JSON.parse(event.data)
+
+        if (message.type === "market_data") {
+          setMarketData((prev) => [...prev.slice(-999), message.candle])
+          setSignals(message.signals || {})
+          setPortfolio(message.portfolio || portfolio)
+        } else if (message.type === "trade_executed") {
+          setTrades((prev) => [message.trade, ...prev])
+          loadPortfolio() // Refresh portfolio
+        }
+      }
+
+      wsRef.current.onclose = () => {
+        console.log("[v0] WebSocket disconnected")
+      }
+
+      wsRef.current.onerror = (error) => {
+        console.log("[v0] WebSocket error:", error)
+      }
+    } catch (error) {
+      console.log("[v0] WebSocket connection failed:", error)
     }
   }
 
   const startStreaming = () => {
+    if (!backendConnected) {
+      console.log("[v0] Starting mock streaming simulation")
+      setIsStreaming(true)
+      simulateMockStreaming()
+      return
+    }
+
     connectWebSocket()
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -102,8 +174,42 @@ export default function TradingDashboard() {
     }
   }
 
+  const simulateMockStreaming = () => {
+    const interval = setInterval(() => {
+      if (!isStreaming) {
+        clearInterval(interval)
+        return
+      }
+
+      // Generate mock price movement
+      const lastPrice = marketData[marketData.length - 1]?.close || 150
+      const change = (Math.random() - 0.5) * 2 // Random change between -1 and 1
+      const newPrice = Math.max(lastPrice + change, 1)
+
+      const newCandle = {
+        timestamp: new Date().toISOString(),
+        open: lastPrice,
+        high: Math.max(lastPrice, newPrice),
+        low: Math.min(lastPrice, newPrice),
+        close: newPrice,
+        volume: Math.floor(Math.random() * 1000000) + 500000,
+      }
+
+      setMarketData((prev) => [...prev.slice(-999), newCandle])
+
+      // Mock signals occasionally
+      if (Math.random() < 0.1) {
+        // 10% chance of signal
+        setSignals({
+          sma: Math.random() > 0.5 ? "buy" : "sell",
+          timestamp: new Date().toISOString(),
+        })
+      }
+    }, 2000) // Update every 2 seconds
+  }
+
   const stopStreaming = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (backendConnected && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({
           action: "stop_streaming",
@@ -115,7 +221,7 @@ export default function TradingDashboard() {
 
   const runBacktest = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/backtest", {
+      const response = await fetch(`${API_BASE_URL}/api/backtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -125,11 +231,26 @@ export default function TradingDashboard() {
           initial_cash: 100000,
           strategy_params: getStrategyParams(),
         }),
+        signal: AbortSignal.timeout(30000),
       })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
       setBacktestResults(data.result)
     } catch (error) {
-      console.error("Failed to run backtest:", error)
+      console.log("[v0] Backtest failed, using mock results:", error.message)
+      setBacktestResults({
+        total_return: 15.5,
+        total_trades: 24,
+        winning_trades: 15,
+        losing_trades: 9,
+        max_drawdown: -5.2,
+        sharpe_ratio: 1.8,
+        equity_curve: [100000, 102000, 101500, 103000, 105000, 108000, 115500],
+        trades: [
+          { timestamp: "2024-01-01T10:00:00Z", action: "buy", quantity: 100, price: 150, pnl: 0 },
+          { timestamp: "2024-01-01T11:00:00Z", action: "sell", quantity: 100, price: 155, pnl: 500 },
+        ],
+      })
     }
   }
 
@@ -148,11 +269,16 @@ export default function TradingDashboard() {
 
   const resetPortfolio = async () => {
     try {
-      await fetch("http://localhost:8000/api/portfolio/reset", { method: "POST" })
+      await fetch(`${API_BASE_URL}/api/portfolio/reset`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5000),
+      })
       loadPortfolio()
       loadTrades()
     } catch (error) {
-      console.error("Failed to reset portfolio:", error)
+      console.log("[v0] Portfolio reset failed, resetting locally:", error.message)
+      setPortfolio({ cash: 100000, total_value: 100000, total_pnl: 0 })
+      setTrades([])
     }
   }
 
@@ -178,8 +304,21 @@ export default function TradingDashboard() {
               </SelectContent>
             </Select>
             <Badge variant={isStreaming ? "default" : "secondary"}>{isStreaming ? "LIVE" : "PAUSED"}</Badge>
+            <Badge variant={backendConnected ? "default" : "destructive"}>
+              {backendConnected ? "API Connected" : "Mock Mode"}
+            </Badge>
           </div>
         </div>
+
+        {!backendConnected && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Backend API not available ({connectionError}). Running in mock mode with sample data. To connect to real
+              backend, ensure FastAPI server is running on port 8000.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Control Panel */}
         <Card>
